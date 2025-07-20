@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>ハハハハハハハハハハハハハハハハハハハハハハハハハ</title>    
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh; /* Ensure the body takes up the full viewport height */
+            background-image: url('waves.jpg');
+            background-size: cover;
+            background-position: center center;
+            background-repeat: no-repeat;
+        }
+        canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .bandcamp-embed {
+            position: relative; /* To position above the canvas */
+            z-index: 1; /* Ensure it's on top */
+            background-color: white;
+            padding: 15px; /* Creates the "thick" border around the iframe */
+            border-radius: 20px; /* Rounds the corners of the container */
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15); /* Adds a subtle shadow for depth */
+            line-height: 0; /* Prevents extra space below the iframe for perfect centering */
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>    
+    <div class="bandcamp-embed">
+        <iframe style="border: 0; width: 350px; height: 350px;" src="https://bandcamp.com/EmbeddedPlayer/track=568770473/size=large/bgcol=ffffff/linkcol=0687f5/minimal=true/transparent=true/" seamless><a href="https://2chome.bandcamp.com/track/mother">mother. by 二丁目</a></iframe>
+    </div>
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl', { alpha: true }); // Enable alpha for transparency
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
+        const vertexShaderSource = `
+        attribute vec4 aVertexPosition;
+        void main() {
+          gl_Position = aVertexPosition;
+        }
+      `;
+
+      const fragmentShaderSource = `
+      precision highp float;
+      uniform float time;
+      uniform vec2 resolution;
+      uniform vec2 iMouse;
+
+      // Simplex noise functions (modified from https://github.com/ashima/webgl-noise)
+      vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+      vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+      vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+      float snoise(vec2 v) {
+        const vec4 C = vec4(0.211324865405187,  // (3.0-sqrt(3.0))/6.0
+                            0.366025403784439,  // 0.5*(sqrt(3.0)-1.0)
+                           -0.577350269189626,  // -1.0 + 2.0 * C.x
+                            0.024390243902439); // 1.0 / 41.0
+        vec2 i  = floor(v + dot(v, C.yy) );
+        vec2 x0 = v -   i + dot(i, C.xx);
+        vec2 i1;
+        i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+        vec4 x12 = x0.xyxy + C.xxzz;
+        x12.xy -= i1;
+        i = mod289(i);
+        vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+                                       + i.x + vec3(0.0, i1.x, 1.0 ));
+        vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+        m = m*m ;
+        m = m*m ;
+        vec3 x = 2.0 * fract(p * C.www) - 1.0;
+        vec3 h = abs(x) - 0.5;
+        vec3 ox = floor(x + 0.5);
+        vec3 a0 = x - ox;
+        m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+        vec3 g;
+        g.x  = a0.x  * x0.x  + h.x  * x0.y;
+        g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+        return 130.0 * dot(m, g);
+      }
+
+      void main() {
+        vec2 uv = (gl_FragCoord.xy / resolution.xy) * 2.0 - 1.0;
+        uv.x *= resolution.x / resolution.y; // Correct aspect ratio
+
+        // --- Mouse Interaction ---
+        // Only apply effect if mouse has entered the screen (iMouse.x > 0)
+        if (iMouse.x > 0.0) {
+            vec2 toMouse = iMouse - gl_FragCoord.xy;
+            float dist = length(toMouse);
+            float radius = 150.0; // Radius of disruption in pixels
+            float strength = 0.2; // Strength of disruption
+
+            // Proximity is 1.0 at the mouse center, fading to 0.0 at the radius
+            float proximity = 1.0 - smoothstep(0.0, radius, dist);
+            proximity = pow(proximity, 2.0); // Sharpen the falloff
+
+            // Apply a turbulent displacement to the texture coordinates, scaled by mouse proximity
+            uv += snoise(uv * 5.0 + time) * proximity * strength;
+        }
+
+        float water = 0.0;
+        float scale = 1.0;
+        float t = time * 0.1;  // Adjust overall speed
+
+        for(int i = 0; i < 3; i++) { // Adjust number of noise layers
+            water += snoise(uv * scale + t) / scale;
+            scale *= 2.0;
+            t *= 0.5; // Make higher layers move slower
+        }
+
+        // Basic color based on water value
+        vec3 waterColor = vec3(0.2, 0.5, 0.8) + water * 0.1;
+
+        // Add highlights (specular)
+        vec2 reflectionUV = uv + vec2(sin(uv.y * 5.0 + time * 0.2), cos(uv.x * 3.0 - time * 0.1)) * 0.05; // Distort UVs for reflection
+        float reflection = snoise(reflectionUV * 4.0 + time * 0.3); // More detailed reflection noise
+        reflection = pow(clamp(reflection, 0.0, 1.0), 4.0) * 0.8; // Sharpen and reduce intensity
+        waterColor += vec3(1.0, 1.0, 1.0) * reflection;
+
+        gl_FragColor = vec4(waterColor, 0.8); // Set alpha to make shader translucent
+      }
+      `;
+
+      function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          return shader;
+        }
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+      }
+
+      const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+      const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+      }
+
+      const positionAttribute = gl.getAttribLocation(program, "aVertexPosition");
+      const timeUniform = gl.getUniformLocation(program, "time");
+      const resolutionUniform = gl.getUniformLocation(program, "resolution");
+      const mouseUniform = gl.getUniformLocation(program, "iMouse");
+
+      const positions = new Float32Array([1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0]);
+      const positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+      gl.vertexAttribPointer(positionAttribute, 2, gl.FLOAT, false, 0, 0);
+      gl.enableVertexAttribArray(positionAttribute);
+
+      gl.useProgram(program);
+      gl.enable(gl.BLEND); // Enable blending for transparency
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); // Standard alpha blending
+
+      const mouse = { x: -1, y: -1 }; // Start mouse off-screen
+      window.addEventListener('mousemove', (event) => {
+          mouse.x = event.clientX;
+          mouse.y = event.clientY;
+      });
+
+      function render(currentTime) {
+          currentTime *= 0.001; // Convert to seconds
+
+        // Update resolution uniform on each frame in case of resize
+        if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        }
+        gl.uniform1f(timeUniform, currentTime);
+        gl.uniform2f(resolutionUniform, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.uniform2f(mouseUniform, mouse.x, canvas.height - mouse.y); // Update mouse uniform, flip Y
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        requestAnimationFrame(render);
+      }
+
+      requestAnimationFrame(render);
+    </script>
+</body>    
+</html>
